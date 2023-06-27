@@ -20,11 +20,14 @@ pub(crate) async fn retrieve_public_key(
     let res = resolver.lookup_txt(&dns_name).await?;
     // TODO: Return multiple keys for when verifiying the signatures. During key
     // rotation they are often multiple keys to consider.
-    let txt = res.first().ok_or(DKIMError::NoKeyForSignature)?;
+    let txt = res
+        .first()
+        .ok_or(DKIMError::NoKeyForSignature)?
+        .replace("\" \"", "");
     debug!(logger, "DKIM TXT: {:?}", txt);
 
     // Parse the tags inside the DKIM TXT DNS record
-    let (_, tags) = parser::tag_list(txt).map_err(|err| {
+    let (_, tags) = parser::tag_list(&txt).map_err(|err| {
         warn!(logger, "key syntax error: {}", err);
         DKIMError::KeySyntaxError
     })?;
@@ -90,6 +93,33 @@ mod tests {
                 Box::pin(async move {
                     assert_eq!(name, "dkim._domainkey.cloudflare.com");
                     Ok(vec!["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6gmVDBSBJ0l1/33uAF0gwIsrjQV6nnYjL9DMX6+ez4NNJ2um0InYy128Rd+OlIhmdSld6g3tj3O6R+BwsYsQgU8RWE8VJaRybvPw2P3Asgms4uPrFWHSFiWMPH0P9i/oPwnUO9jZKHiz4+MzFC3bG8BacX7YIxCuWnDU8XNmNsRaLmrv9CHX4/3GHyoHSmDA1ETtyz9JHRCOC8ho8C7b4f2Auwedlau9Lid9LGBhozhgRFhrFwFMe93y34MO1clPbY6HwxpudKWBkMQCTlmXVRnkKxHlJ+fYCyC2jjpCIbGWj2oLxBtFOASWMESR4biW0ph2bsZXslcUSPMTVTkFxQIDAQAB".to_string()])
+                })
+            }
+        }
+        let resolver = Arc::new(TestResolver {});
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+
+        retrieve_public_key(
+            &logger,
+            resolver,
+            "cloudflare.com".to_string(),
+            "dkim".to_string(),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_public_split() {
+        struct TestResolver {}
+        impl dns::Lookup for TestResolver {
+            fn lookup_txt<'a>(
+                &'a self,
+                name: &'a str,
+            ) -> BoxFuture<'a, Result<Vec<String>, DKIMError>> {
+                Box::pin(async move {
+                    assert_eq!(name, "dkim._domainkey.cloudflare.com");
+                    Ok(vec!["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgK\" \"CAQEA6gmVDBSBJ0l1/33uAF0gwIsrjQV6nnYjL9DMX6+ez4NNJ2um0InYy128Rd+OlIhmdSld6g3tj3O6R+BwsYsQgU8RWE8VJaRybvPw2P3Asgms4uPrFWHSFiWMPH0P9i/oPwnUO9jZKHiz4+MzFC3bG8BacX7YIxCuWnDU8XNmNsRaLmrv9CHX4/3GHyoHSmDA1ETtyz9JHRCOC8ho8C7b4f2Auwedlau9Lid9LGBhozhgRFhrFwFMe93y34MO1clPbY6HwxpudKWBkMQCTlmXVRnkKxHlJ+fYCyC2jjpCIbGWj2oLxBtFOASWMESR4biW0ph2bsZXslcUSPMTVTkFxQIDAQAB".to_string()])
                 })
             }
         }
