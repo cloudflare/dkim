@@ -70,9 +70,14 @@ pub(crate) async fn retrieve_public_key(
                 })?,
         )
     } else {
-        DkimPublicKey::Ed25519(ed25519_dalek::PublicKey::from_bytes(&bytes).map_err(|err| {
-            DKIMError::KeyUnavailable(format!("failed to parse public key: {}", err))
-        })?)
+        DkimPublicKey::Ed25519(
+            ed25519_dalek::VerifyingKey::from_bytes((&bytes as &[u8]).try_into().map_err(
+                |err| DKIMError::KeyUnavailable(format!("failed to convert public key: {}", err)),
+            )?)
+            .map_err(|err| {
+                DKIMError::KeyUnavailable(format!("failed to parse public key: {}", err))
+            })?,
+        )
     };
     Ok(key)
 }

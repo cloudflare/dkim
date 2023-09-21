@@ -1,6 +1,6 @@
 use base64::engine::general_purpose;
 use base64::Engine;
-use ed25519_dalek::ExpandedSecretKey;
+use ed25519_dalek::Signer;
 use rsa::Pkcs1v15Sign;
 use sha1::Sha1;
 use sha2::Sha256;
@@ -101,7 +101,7 @@ impl<'a> SignerBuilder<'a> {
     /// Build an instance of the Signer
     /// Must be provided: signed_headers, private_key, selector, logger and
     /// signing_domain.
-    pub fn build(self) -> Result<Signer<'a>, DKIMError> {
+    pub fn build(self) -> Result<DKIMSigner<'a>, DKIMError> {
         use DKIMError::BuilderError;
 
         let private_key = self
@@ -112,7 +112,7 @@ impl<'a> SignerBuilder<'a> {
             DkimPrivateKey::Ed25519(_) => hash::HashAlgo::Ed25519Sha256,
         };
 
-        Ok(Signer {
+        Ok(DKIMSigner {
             signed_headers: self
                 .signed_headers
                 .ok_or(BuilderError("missing required signed headers"))?,
@@ -139,7 +139,7 @@ impl<'a> Default for SignerBuilder<'a> {
     }
 }
 
-pub struct Signer<'a> {
+pub struct DKIMSigner<'a> {
     signed_headers: &'a [&'a str],
     private_key: DkimPrivateKey,
     selector: &'a str,
@@ -153,7 +153,7 @@ pub struct Signer<'a> {
 }
 
 /// DKIM signer. Use the [SignerBuilder] to build an instance.
-impl<'a> Signer<'a> {
+impl<'a> DKIMSigner<'a> {
     /// Sign a message
     /// As specified in <https://datatracker.ietf.org/doc/html/rfc6376#section-5>
     pub fn sign<'b>(&self, email: &'b mailparse::ParsedMail<'b>) -> Result<String, DKIMError> {
@@ -175,13 +175,7 @@ impl<'a> Signer<'a> {
                     &header_hash,
                 )
                 .map_err(|err| DKIMError::FailedToSign(err.to_string()))?,
-            DkimPrivateKey::Ed25519(keypair) => {
-                let expanded: ExpandedSecretKey = (&keypair.secret).into();
-                expanded
-                    .sign(&header_hash, &keypair.public)
-                    .to_bytes()
-                    .into()
-            }
+            DkimPrivateKey::Ed25519(keypair) => keypair.sign(&header_hash).to_bytes().into(),
         };
 
         // add the signature into the DKIM header and generate the header
@@ -319,16 +313,9 @@ Joe."#
 
         let file_content = fs::read("./test/keys/ed.private").unwrap();
         let file_decoded = general_purpose::STANDARD.decode(file_content).unwrap();
-        let secret_key = ed25519_dalek::SecretKey::from_bytes(&file_decoded).unwrap();
+        let secret_key = ed25519_dalek::SecretKey::try_from(file_decoded).unwrap();
 
-        let file_content = fs::read("./test/keys/ed.public").unwrap();
-        let file_decoded = general_purpose::STANDARD.decode(file_content).unwrap();
-        let public_key = ed25519_dalek::PublicKey::from_bytes(&file_decoded).unwrap();
-
-        let keypair = ed25519_dalek::Keypair {
-            public: public_key,
-            secret: secret_key,
-        };
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&secret_key);
 
         let logger = test_logger();
         let time = chrono::Utc
@@ -347,7 +334,7 @@ Joe."#
                 "Date",
             ])
             .unwrap()
-            .with_private_key(DkimPrivateKey::Ed25519(keypair))
+            .with_private_key(DkimPrivateKey::Ed25519(signing_key))
             .with_body_canonicalization(canonicalization::Type::Relaxed)
             .with_header_canonicalization(canonicalization::Type::Relaxed)
             .with_selector("brisbane")
