@@ -2,6 +2,7 @@ use crate::{canonicalization, hash, DKIMError};
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
 use nom::character::complete::alpha1;
+use nom::combinator::all_consuming;
 use nom::combinator::opt;
 use nom::multi::fold_many0;
 use nom::sequence::delimited;
@@ -27,7 +28,7 @@ pub struct Tag {
 pub fn tag_list(input: &str) -> IResult<&str, Vec<Tag>> {
     let (input, start) = tag_spec(input)?;
 
-    terminated(
+    all_consuming(terminated(
         fold_many0(
             preceded(tag(";"), tag_spec),
             move || vec![start.clone()],
@@ -37,7 +38,7 @@ pub fn tag_list(input: &str) -> IResult<&str, Vec<Tag>> {
             },
         ),
         opt(tag(";")),
-    )(input)
+    ))(input)
 }
 
 /// tag-spec  =  [FWS] tag-name [FWS] "=" [FWS] tag-value [FWS]
